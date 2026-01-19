@@ -205,3 +205,10 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+
+AI_News_Event_Clustering.txt
+mistakes.txt
+gdelt_2026_clean.csv
+gdelt_2026/
