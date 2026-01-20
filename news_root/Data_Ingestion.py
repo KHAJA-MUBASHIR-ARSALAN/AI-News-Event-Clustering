@@ -1,102 +1,88 @@
-import requests
-import os
-import glob
-import zipfile
-import pandas as pd
-
-# =========================
-# CONFIG
-# =========================
-MASTER_URL = "http://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
-SAVE_DIR = "gdelt_2026"
-FINAL_CSV = "gdelt_2026_clean.csv"
-
-os.makedirs(SAVE_DIR, exist_ok=True)
-
-# =========================
-# STEP 1: DOWNLOAD FILES
-# =========================
-print("Downloading GDELT 2026 files...")
-text = requests.get(MASTER_URL).text
-
-for line in text.splitlines():
-    parts = line.split()
-    if len(parts) < 3:
-        continue
-
-    url = parts[-1]
-
-    # ✅ STRICT filter: ONLY 2026 event files
-    if (
-        "/gdeltv2/2026" in url
-        and url.endswith(".export.CSV.zip")
-    ):
-        filename = os.path.basename(url)
-        filepath = os.path.join(SAVE_DIR, filename)
-
-        if os.path.exists(filepath):
-            continue
-
-        print(f"Downloading: {filename}")
-        r = requests.get(url, stream=True)
-        with open(filepath, "wb") as f:
-            for chunk in r.iter_content(8192):
-                f.write(chunk)
+import pandas as pd 
+import numpy as np
+from myeda import dataset_overview
+from myeda import missing_overview, missing_summary
+from myeda.core.missing import plot_missing
 
 
-print("Download complete.")
+df = pd.read_csv("gdelt_2026_clean.csv")
+pd.set_option("display.max_columns",None)
+print(df.head(3))
 
-# =========================
-# STEP 2: UNZIP FILES
-# =========================
-print("Extracting zip files...")
-for zip_file in glob.glob(f"{SAVE_DIR}/*.zip"):
-    with zipfile.ZipFile(zip_file, "r") as z:
-        z.extractall(SAVE_DIR)
+# overview of dataset
 
-print("Extraction complete.")
+print(dataset_overview(df))
 
-# =========================
-# STEP 3: CLEAN + MERGE
-# =========================
-COL_INDEX_MAP = {
-    "GLOBALEVENTID": 0,
-    "SQLDATE": 1,
-    "Actor1Name": 6,
-    "Actor2Name": 16,
-    "EventCode": 26,
-    "EventBaseCode": 27,
-    "ActionGeo_FullName": 52,
-    "ActionGeo_CountryCode": 53,
-    "ActionGeo_Lat": 56,
-    "ActionGeo_Long": 57,
-    "SOURCEURL": 60
-}
 
-USE_COLS = list(COL_INDEX_MAP.values())
-COL_NAMES = list(COL_INDEX_MAP.keys())
 
-files = glob.glob(f"{SAVE_DIR}/*.export.CSV")
-print(f"Found {len(files)} CSV files")
 
-first = True
 
-for f in files:
-    df_part = pd.read_csv(
-        f,
-        sep="\t",
-        header=None,
-        usecols=USE_COLS,
-        names=COL_NAMES,
-        low_memory=False
-    )
+# lower casing
 
-    df_part.to_csv(
-        FINAL_CSV,
-        mode="w" if first else "a",
-        index=False,
-        header=first
-    )
-    first = False
+def lowercase(df: pd.DataFrame) -> pd.DataFrame:
+  text_cols = df.select_dtypes(include="object").columns
 
-print("✅ Finished writing gdelt_2026_clean.csv")
+
+  for col in text_cols:
+    df[col] = df[col].fillna("").str.lower()
+  
+  print("lowercasing is done.")
+  return df
+
+df = lowercase(df)
+
+print(df.head(3))
+
+
+
+
+
+
+# missing values
+def missing(df: pd.DataFrame) -> pd.DataFrame:
+
+  print("Handling missing values\n")
+
+  print(missing_overview(df))
+  print(missing_summary(df))
+  plot_missing(df)
+
+df = missing(df)
+
+# here I tried for grouping country with their median lat long values but in 97% cases these values have null as both so, this strategy failed. If I go with whole dataset median that can be misslead my prediction.
+
+print(df['ActionGeo_CountryCode'].isnull().sum())
+df.groupby('ActionGeo_CountryCode')['ActionGeo_Lat'].count().sort_values()
+
+
+df['ActionGeo_Lat'] = df['ActionGeo_Lat'].fillna(
+    df.groupby('ActionGeo_CountryCode')['ActionGeo_Lat'].transform('median')
+)
+
+df['ActionGeo_Long'] = df['ActionGeo_Long'].fillna(
+    df.groupby('ActionGeo_CountryCode')['ActionGeo_Long'].transform('median')
+)
+
+# so I simply drop those rows because they are just 2.5% of the dataset.
+
+df = df.dropna(subset=['ActionGeo_Lat', 'ActionGeo_Long'], how='all')
+df[['ActionGeo_Lat', 'ActionGeo_Long']].isnull().sum()
+
+print("Data after handling missing values\n")
+
+df = missing(df)
+
+
+
+
+
+# converting into datetime
+def datetime(df: pd.DataFrame) -> pd.DataFrame:
+  print("converting datetime start")
+
+  df['SQLDATE'] = pd.to_datetime(df['SQLDATE'], format='%Y%m%d')
+
+  print(df.tail(3).T)
+  print("converting datetime ended")
+
+df = datetime(df)
